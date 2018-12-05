@@ -1,0 +1,275 @@
+---
+title: "MNIST Written Character Classification - Pt1"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+
+library(tidyverse)
+library(caret)
+library(Rtsne)
+library(scatterplot3d)
+
+# Windows wd command.  I hate that this line is needed.  I miss Python.
+#setwd("C:/Users/Martin/Dropbox/Study/Intro_Machine_Learning/coursework")
+
+# Linux wd command.
+setwd("/home/study/Dropbox/Study/Intro_Machine_Learning/coursework")
+
+# ------------------------------------------- #
+#      Read in all the samples
+#      Code obtained from https://gist.github.com/brendano/39760
+#      I added some comments
+# ------------------------------------------- #
+
+load_mnist <- function(dir_loc) {
+  
+  # This function specifically reads images stored in this standard format
+  load_image_file <- function(filename) {
+    ret = list()
+    f = file(filename,'rb')
+    
+    # Get the row and column size data (image dimensions) stored in the header
+    readBin(f,'integer',n=1,size=4,endian='big')
+    ret$n = readBin(f,'integer',n=1,size=4,endian='big')
+    nrow = readBin(f,'integer',n=1,size=4,endian='big')
+    ncol = readBin(f,'integer',n=1,size=4,endian='big')
+    x = readBin(f,'integer',n=ret$n*nrow*ncol,size=1,signed=F)
+    
+    # Iteratively create a matrix until the file runs out of data
+    ret$x = matrix(x, ncol=nrow*ncol, byrow=T)
+    close(f)
+    ret
+  }
+  
+  # This reads the labels
+  load_label_file <- function(filename) {
+    f = file(filename,'rb')
+    readBin(f,'integer',n=1,size=4,endian='big')
+    n = readBin(f,'integer',n=1,size=4,endian='big')
+    y = readBin(f,'integer',n=n,size=1,signed=F)
+    close(f)
+    y
+  }
+  
+  # Read all the images, assign to global variable
+  trainset <<- data.frame( load_image_file(paste(dir_loc, '/train-images.idx3-ubyte', sep="")) )
+  testset <<- data.frame( load_image_file(paste(dir_loc, '/t10k-images.idx3-ubyte', sep="")) )
+  
+  # Read all the images, assign to global variable
+  # This first converts to character, adds prefix "char", then converts to factor.
+  trainset$y <<- as.factor( sub("^", "chr", as.character( load_label_file(paste(dir_loc, '/train-labels.idx1-ubyte', sep="")) ) ) )
+  testset$y <<- as.factor( sub("^", "chr", as.character( load_label_file(paste(dir_loc, '/t10k-labels.idx1-ubyte', sep="")) ) ) )
+
+}
+
+load_mnist("data")
+
+
+# I'm going to scale the data
+# Easy trick with images (pixel intensity in range 0 - 255)
+# Probably not needed for kNN or PCA, but is good for NN's
+
+for(column in colnames(trainset[,2:785])) {
+  trainset[column] = trainset[column] / 255.0
+  testset[column] = testset[column] / 255.0
+}
+
+```
+
+
+# 1. Introduction
+
+## Machine Learning and Supervised Classification
+
+In machine learning, a supervised classification problem entails fitting an algorithm to map some input features X to a desirable output label Y, ie; training a machine to automatically classify a sample into some category based on available data about it ("Is this customer fraudulent? Is this a picture of a face?").
+
+Labelled data is used to train the ML algorithm, split into training and test data.  In training the algorithm we run the risk of over-fitting, a complex model can become over-reliant on aspects of the data that are just quirks of the particular set.  The result is reduced performance when the trained model is used to classify new data that it's not been exposed to during training.  The solution to this is to hold out a "test" set of labelled data, and use it to evaluate the model's performance on unseen data.
+
+In this example we have a training dataset of 60,000 samples and a test set of 10,000 samples.  We will train different kNN models, and a neural network, on the first 60,000 and evaluate performance of the different models on the last 10,000.   This will be done by first reducing the dimensionality of the data using PCA, and then selecting the best performing hyperparameter k (number of nearest neighbors to consider) through cross-validated training performance before evaluating a final model on the test set.  
+
+[DN:  kNN model isn't really "trained", it just compares new data to the values of the k-nearest samples in the training data and derives a label from majority vote...]
+
+
+## The MNIST data
+
+The MNIST character dataset is, as described in the coursework brief, an industry standard image classification problem.  An important aspect of the data is that the images have been centred and scaled to the characters, reduced to black and white images and the resolution set uniform.  This removes the need for us to engage in complex image normalisation steps before attempting classification, or more complex models like Convolutional Neural Networks that can automate the discovery of the lowest-level features and relevant areas of an image.  ML algorithms applied to this dataset are then left with higher level logic, finding significant edges and pixels to distinguish between characters.
+
+The images are 28 * 28 matrices of pixel intensity, the first 25 images are displayed below.  The data has been read in with the above code - note that in the last step the values (which range between 0-255 to represent pixel intensity) are scaled to lie between 0 and 1 - this scaling helps a lot of ML algorithms.  More sophisticated methods of scaling values exist but offer no advantage here.
+
+
+
+```{r}
+# ------------------------------------------- #
+#      The first few training images
+# ------------------------------------------- #
+
+
+to.read = file("./data/train-images.idx3-ubyte", "rb")
+
+# Read the header of the training data
+header = readBin(to.read, 'integer', n=4, endian="big")
+
+# Retrieve and plot 25 of the images
+# (it's a sequential read)
+
+par(mfrow=c(5, 5), mar=c(0, 0, 0, 0))
+for(i in 1:25) {
+  m = matrix(readBin(to.read, 'integer', size=1, n=28*28, endian="big", signed=F),28,28)
+  
+  # Invert the image values for plotting
+  m <- 255 - m
+  
+  # visualise
+  image(m[,28:1], col=grey.colors(12), zlim=c(0.0, 255.0))
+}
+
+# Close the file
+close(to.read)
+```
+
+
+
+# 2.  Dimensionality Reduction
+
+Principal Component Analysis (PCA) works by calculating the axis in the n-dimensional data space along which variance is greatest, and then sequentially finding perpendicular axes with the next greatest variance.  The algorithm can be used for dimensionality reduction, by dropping all but the first few axes embodying the highest percentage of variance within the dataset.  This retains axes along which data is well separated while dropping "noisy" axes lacking clear information (separation of categories).
+
+Common practice is to keep those that embody 80% of the variance in the data.  The function at the end of the snippet below examines the cumulative sum of the variance and determines that this is the first 43 Principal components, a significant improvement upon the original dimensionality of 784 individual features (pixels).  The choice of number of principal components to keep will vary between problems, another hyperparameter to find an optimal value for in practice.
+
+[DN:  May later wrap the PCA and auto-choice of dimensions in a function later, so that it can be incorporated into the later ML pipeline as pre-processing and the threshold optimised in a parameter search.]
+
+```{r}
+# ------------------------------------------- #
+#      Pre-modelling visualisation
+#      Am expected to use "appropriate dimensionality reduction techniques
+#      That means Principal Component analysis and t-SNE to me
+# ------------------------------------------- #
+
+# First; pca!  Apparently can't use scaling because of zero value columns
+# But I effectively scaled when I normalised to between 0-1 didn't I?
+train_pca <- prcomp(trainset[,2:785], center=TRUE)
+
+# How many of the PCA axes are useful?  Assume threshold of 80 % of cumulative variance
+select_dimensionality <- function(sdevs, threshold=0.8) {
+  # Function assumes it receives a descending-ordered list of the standard deviations of a PCA object
+  pca_variance <- sdevs ** 2.0  # Variance is, of course, SD to power 2
+  cumulative_variance <- cumsum(pca_variance)
+  sum( cumulative_variance < threshold * sum(pca_variance) )
+}
+
+num_PCs <- select_dimensionality(summary(train_pca)$sdev)
+
+# Extract the data to a new DF for later use in ML algorithms
+# Drop unwanted PC's
+trainset.pca <- data.frame(train_pca$x[,1:num_PCs])
+trainset.pca$y <- trainset$y
+
+```
+
+
+
+A secondary advantage of PCA is that it becomes possible to plot the relations between high-dimensional data by plotting the first few Principal components, containing the greatest variance.
+
+```{r}
+
+# Visualise first two principal components nicely
+pl <- ggplot(dat=trainset.pca, aes(x=PC1, y=PC2, group=y, color=y)) +
+      geom_point(size=3, alpha=0.5) +
+      scale_color_brewer(palette="Paired")
+pl
+```
+
+```{r}
+# This works, or not, at random, because windows.  It's only here for eye-candy anyway I guess.
+# Visualise the first three principal components poorly
+par(mar=c(0, 0, 0, 0)) # without this, complains about margin size
+scatterplot3d(x=trainset.pca$PC1, y=trainset.pca$PC2, z=trainset.pca$PC3, pch=23, bg=trainset.pca$y, xlab="PC1", ylab="PC2", zlab="PC3")
+```
+
+
+For visualising high-dimensional data, another option besides PCA exists known as t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the data by dynamically mapping the distance between points in the high-dimensional space to the low ones in a flexible, stochastic way that is itself considered an ML algorithm. Plots created through it can give a good indication of the separability of data.
+
+The downside of the method is that because it does not create a specific, algorithmic mapping between the high-dimensional space and the low, it cannot be applied to new data or test data.  It can only be applied to a dataset as a whole and and is not reproducible, so it can't be easily used to create inputs for ML algorithms.
+
+```{r}
+# Set random seed for reproducibility (stochastic process)
+set.seed(7)   
+
+# Second, t-SNE!  Much preferable.
+# Can reduce to arbitrary number of dimensions, default is 2
+train_tsne <- Rtsne(as.matrix(trainset[,2:785]), num_threads=8)  # Extra threads not used because openMP on Windows sucks
+
+```
+
+
+```{r}
+trainset.tsne <- data.frame(train_tsne$Y)
+trainset.tsne$y <- trainset$y
+
+# The t-SNE algorithm directly reduced the number of dimensions to 2
+pl <- ggplot(dat=trainset.tsne, aes(x=X1, y=X2, group=y, color=y)) +
+  geom_point(size=3, alpha=0.1) +
+  scale_color_brewer(palette="Paired")
+pl
+
+```
+
+
+
+# 3. Classification with k-Nearest Neighbors (k-NN)
+
+k-NN applied to this dataset benefits greatly from scaling and Principal Component Analysis, both of which have already been applied.  What remains is to determine the best value for the hyperparameter k.  For this purpose I'm using the "caret" ML library, which has lots of useful options and functions for performing grid searches over hyperparameters, before reporting and comparing results on multiple metrics.  Here I compare a raft of different potential values for k in a k-NN model.
+
+I also compare to the performance of Naive Bayes, which attempts to classify assuming every feature is completely independent (a "naive" assumption) and therefore represents a useful baseline performance indicator as the simplest possible multi-class model.
+
+[DN:  NAIVE BAYES NOT WORKING YET, NaiveNayes doesn't like zeros or something, working on it]
+
+[DN: State somewhere, after determining the ideal k-value based on the chosen metric the model is automatically refitted using that value to the whole of the training set.]
+
+[DN: Will increase number of folds to 10 later - it's not running fast enough on this old laptop right now]
+
+```{r}
+
+# Set up the training algorithm (allows for specifying performance measures and cross-validation folds, etc)
+# Specified class probabilities, a more comprehensive summary function and 10-fold cross-validation
+control <- trainControl(method="cv", number=3, classProbs=TRUE, summaryFunction=multiClassSummary)  
+
+# The metric the algorithm will use to decide the best-performer
+metric <- "Accuracy"  
+
+# Create the parameterspace to be explored (only one for this algorithm)
+param_grid = data.frame(k = c(3, 5, 7, 9, 11))
+```
+
+Fitting the model can take a while.
+```{r}
+# For comparison, fit Naive Bayes
+#fit.bay <- train(y~., data=trainset.pca, method="nb", metric=metric, trControl=control)
+# Fit the kNN models
+fit.knn <- train(y~., data=trainset.pca, method="knn", metric=metric, trControl=control, tuneGrid=expand.grid(param_grid))
+```
+
+```{r}
+# Plot performance of all knn variants
+plot(fit.knn, print.thres=0.5, type="S")
+```
+
+```{r}
+# Lets look at the model results on some key measures of accuracy
+fit.knn$results[,1:7]
+```
+
+The highest predictive accuracy, and mean F1 score (calculated from precision and recall) of 0.9751 and 0.9749 respectively are obtained with k=5 nearest neighbors [DN:  May change when run with more folds] so 5 is our preferred value for the k hyperparameter.  The logLoss and AUC are poor guides to performance here because they are calculated from the probabilities of each label for each sample rather than the final classifications, and so for any given sample can appear to improve as a higher k provides better overall probabilities, whilst the final decision/predicted class is in fact wrong. [DN:  Check understanding].
+
+
+## 4.  A Further Model - Neural Networks
+
+For the fun of it I'm going to implement a simple, fully connected feedforward neural network.  Normally for image analysis problems a more complex convolutional neural network is needed, able to fit to the low-level features useful for classification of messy image data.  In this case, as stated earlier, the images are already centred, grey-scaled and reduced to standardised 28*28 pixel resolution.  In combination with PCA to find optimal low-level features a standard MLP should perform quite well on this task.
+
