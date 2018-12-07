@@ -93,16 +93,28 @@ In machine learning, a supervised classification problem entails fitting an algo
 
 Labelled data is used to train the ML algorithm, split into training and test data.  In training the algorithm we run the risk of over-fitting, a complex model can become over-reliant on aspects of the data that are just quirks of the particular set.  The result is reduced performance when the trained model is used to classify new data that it's not been exposed to during training.  The solution to this is to hold out a "test" set of labelled data, and use it to evaluate the model's performance on unseen data.
 
-In this example we have a training dataset of 60,000 samples and a test set of 10,000 samples.  We will train different kNN models, and a neural network, on the first 60,000 and evaluate performance of the different models on the last 10,000.   This will be done by first reducing the dimensionality of the data using PCA, and then selecting the best performing hyperparameter k (number of nearest neighbors to consider) through cross-validated training performance before evaluating a final model on the test set.  
+In this example we have a training dataset of 60,000 samples and a test set of 10,000 samples.  We will train different kNN models, and a neural network, on the first 60,000 and evaluate performance of the different models on the last 10,000.   This will be done by first reducing the dimensionality of the data using PCA, and then selecting the best performing hyperparameter k (number of nearest neighbors to consider) through cross-validated training performance before evaluating a final model on the test set.
 
-[DN:  kNN model isn't really "trained", it just compares new data to the values of the k-nearest samples in the training data and derives a label from majority vote...]
+```{r}
+# Plot class membership of the training and test data
+all_ys <- c(as.character(trainset$y), as.character(testset$y))
+
+# Visualise first two principal components nicely
+pl <- ggplot(dat=trainset.pca, aes(x=PC1, y=PC2, group=y, color=y)) +
+      geom_point(size=3, alpha=0.5) +
+      scale_color_brewer(palette="Paired")
+pl
+
+```
+
+As we can see in the figure above [DN: Add a figure above] the classes 0-9 for MNIST are roughly balanced - in this case "Accuracy" and "Area Under Curve" are suitable metrics for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
 
 
 ## The MNIST data
 
 The MNIST character dataset is, as described in the coursework brief, an industry standard image classification problem.  An important aspect of the data is that the images have been centred and scaled to the characters, reduced to black and white images and the resolution set uniform.  This removes the need for us to engage in complex image normalisation steps before attempting classification, or more complex models like Convolutional Neural Networks that can automate the discovery of the lowest-level features and relevant areas of an image.  ML algorithms applied to this dataset are then left with higher level logic, finding significant edges and pixels to distinguish between characters.
 
-The images are 28 * 28 matrices of pixel intensity, the first 25 images are displayed below.  The data has been read in with the above code - note that in the last step the values (which range between 0-255 to represent pixel intensity) are scaled to lie between 0 and 1 - this scaling helps a lot of ML algorithms.  More sophisticated methods of scaling values exist but offer no advantage here.
+The images are 28 * 28 matrices of pixel intensity, the first 25 images are displayed below.  The data has been read in with the above code - note that in the last step the values (which range between 0-255 to represent pixel intensity) are scaled to lie between 0 and 1 - this scaling will help the neural network model to converge and is in general a good idea.  More sophisticated methods of scaling values exist but offer no advantage here.
 
 
 
@@ -156,6 +168,10 @@ Common practice is to keep those that embody 80% of the variance in the data.  T
 # But I effectively scaled when I normalised to between 0-1 didn't I?
 train_pca <- prcomp(trainset[,2:785], center=TRUE)
 
+```
+
+```{r}
+
 # How many of the PCA axes are useful?  Assume threshold of 80 % of cumulative variance
 select_dimensionality <- function(sdevs, threshold=0.8) {
   # Function assumes it receives a descending-ordered list of the standard deviations of a PCA object
@@ -164,12 +180,17 @@ select_dimensionality <- function(sdevs, threshold=0.8) {
   sum( cumulative_variance < threshold * sum(pca_variance) )
 }
 
-num_PCs <- select_dimensionality(summary(train_pca)$sdev)
+num_PCs <- select_dimensionality(summary(train_pca)$sdev, threshold=0.9)
 
 # Extract the data to a new DF for later use in ML algorithms
 # Drop unwanted PC's
 trainset.pca <- data.frame(train_pca$x[,1:num_PCs])
 trainset.pca$y <- trainset$y
+
+# Finally, apply the PCA transformations to the test data
+testset.pca <- data.frame( predict(train_pca, testset[,2:785])[,1:num_PCs] )
+testset.pca$y <- testset$y
+colnames(testset.pca) <- sub("x.", "PC", colnames(testset.pca))
 
 ```
 
@@ -269,7 +290,75 @@ fit.knn$results[,1:7]
 The highest predictive accuracy, and mean F1 score (calculated from precision and recall) of 0.9751 and 0.9749 respectively are obtained with k=5 nearest neighbors [DN:  May change when run with more folds] so 5 is our preferred value for the k hyperparameter.  The logLoss and AUC are poor guides to performance here because they are calculated from the probabilities of each label for each sample rather than the final classifications, and so for any given sample can appear to improve as a higher k provides better overall probabilities, whilst the final decision/predicted class is in fact wrong. [DN:  Check understanding].
 
 
+
+
 ## 4.  A Further Model - Neural Networks
 
 For the fun of it I'm going to implement a simple, fully connected feedforward neural network.  Normally for image analysis problems a more complex convolutional neural network is needed, able to fit to the low-level features useful for classification of messy image data.  In this case, as stated earlier, the images are already centred, grey-scaled and reduced to standardised 28*28 pixel resolution.  In combination with PCA to find optimal low-level features a standard MLP should perform quite well on this task.
+
+I got the intro to Keras for R from this website;  https://blog.rstudio.com/2017/09/05/keras-for-r/
+
+Yes, it's just calling Python in the background.  Yes, that's just embarassing for R.  But ONS insists...
+
+We need to build a model, printing a summary of its structure:
+
+```{r}
+# Tell it to use python 3 to run this stuff
+use_python("usr/bin/python3")
+
+# Import sequential model class
+model <- keras_model_sequential()
+
+# Simple model of two hidden, dense layers and a 10 class output layer
+model %>%
+  layer_dense(units=64, activation="relu", input_shape = c( dim(trainset.pca)[2] - 1 )) %>%
+  layer_dropout(rate=0.2) %>%
+  layer_dense(units=32, activation="relu") %>%
+  layer_dropout(rate=0.2) %>%
+  layer_dense(units=10, activation="softmax")
+
+# Compile the model's loss function and optimiser
+model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_rmsprop(),
+  metrics = c("accuracy")
+)
+
+# print a summary of the model structure we've created
+summary(model)
+
+```
+
+
+This part just shuffles data, one-hot encoding the targets and converting the input to a numeric matrix.  This is basically only needed because the Caret package I was using demanded data frames, so that's the format I set up to import in.  I prefer Python's approach of dropping to matrices and such for any ML work consistently.
+
+```{r}
+
+# Convert the (now character) classes into one-hot-encoded categorical target vars
+trainset_y_cat = to_categorical( as.integer( sub("chr", "", trainset.pca$y) ) )
+testset_y_cat = to_categorical( as.integer( sub("chr", "", testset.pca$y) ) )
+
+# Convert the input data into a pure number matrix format
+trainset_x_mat = as.matrix( trainset.pca[, -ncol(trainset.pca)]) 
+testset_x_mat = as.matrix( testset.pca[, -ncol(testset.pca)]) 
+
+```
+
+Finally, first application of the model;
+
+```{r}
+
+# Fit the model
+
+history <- model %>% fit(
+  trainset_x_mat, trainset_y_cat,
+  epochs = 30, batch_size = 64,
+  validation_split = 0.2
+)
+```
+
+```{r}
+# Evaluate the model
+model %>% evaluate(testset_x_mat, testset_y_cat)
+```
 
