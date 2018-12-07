@@ -67,6 +67,12 @@ load_mnist <- function(dir_loc) {
   # This first converts to character, adds prefix "char", then converts to factor.
   trainset$y <<- as.factor( sub("^", "chr", as.character( load_label_file(paste(dir_loc, '/train-labels.idx1-ubyte', sep="")) ) ) )
   testset$y <<- as.factor( sub("^", "chr", as.character( load_label_file(paste(dir_loc, '/t10k-labels.idx1-ubyte', sep="")) ) ) )
+  
+  # In case there was any ordering present in the datasets, shuffle the rows at random
+  set.seed(7)   
+  
+  trainset <<- trainset[sample(nrow(trainset)),]
+  testset <<- testset[sample(nrow(testset)),]
 
 }
 
@@ -99,15 +105,19 @@ In this example we have a training dataset of 60,000 samples and a test set of 1
 # Plot class membership of the training and test data
 all_ys <- c(as.character(trainset$y), as.character(testset$y))
 
-# Visualise first two principal components nicely
-pl <- ggplot(dat=trainset.pca, aes(x=PC1, y=PC2, group=y, color=y)) +
-      geom_point(size=3, alpha=0.5) +
-      scale_color_brewer(palette="Paired")
+# Create a table of counts by membership
+all_ys_df <- data.frame( table( all_ys ) )
+
+colnames(all_ys_df) <- c("Character", "Frequency")
+
+# Visualise the numbers within each category
+pl <- ggplot(dat=all_ys_df, aes(x=Character, y=Frequency)) +
+      geom_bar(stat="identity")
 pl
 
 ```
 
-As we can see in the figure above [DN: Add a figure above] the classes 0-9 for MNIST are roughly balanced - in this case "Accuracy" and "Area Under Curve" are suitable metrics for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
+As seen in the figure above the classes 0-9 for MNIST are roughly balanced - in this case "Accuracy" and "Area Under Curve" are suitable metrics for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
 
 
 ## The MNIST data
@@ -153,9 +163,8 @@ close(to.read)
 
 Principal Component Analysis (PCA) works by calculating the axis in the n-dimensional data space along which variance is greatest, and then sequentially finding perpendicular axes with the next greatest variance.  The algorithm can be used for dimensionality reduction, by dropping all but the first few axes embodying the highest percentage of variance within the dataset.  This retains axes along which data is well separated while dropping "noisy" axes lacking clear information (separation of categories).
 
-Common practice is to keep those that embody 80% of the variance in the data.  The function at the end of the snippet below examines the cumulative sum of the variance and determines that this is the first 43 Principal components, a significant improvement upon the original dimensionality of 784 individual features (pixels).  The choice of number of principal components to keep will vary between problems, another hyperparameter to find an optimal value for in practice.
+Common practice is to keep those that embody 80 % of the variance in the data.  Based on a visual inspection of the cumulative variance with dimensions below, 90 % is chosen instead.  This looks to be a good balance between capturing variance and the diminishing returns with more dimensions.  This variance is in the first 86 Principal components, a significant improvement upon the original dimensionality of 784 individual features (pixels).  The choice of number of principal components is another hyperparameter that one might choose to optimise.
 
-[DN:  May later wrap the PCA and auto-choice of dimensions in a function later, so that it can be incorporated into the later ML pipeline as pre-processing and the threshold optimised in a parameter search.]
 
 ```{r}
 # ------------------------------------------- #
@@ -174,10 +183,21 @@ train_pca <- prcomp(trainset[,2:785], center=TRUE)
 
 # How many of the PCA axes are useful?  Assume threshold of 80 % of cumulative variance
 select_dimensionality <- function(sdevs, threshold=0.8) {
+  
   # Function assumes it receives a descending-ordered list of the standard deviations of a PCA object
   pca_variance <- sdevs ** 2.0  # Variance is, of course, SD to power 2
   cumulative_variance <- cumsum(pca_variance)
-  sum( cumulative_variance < threshold * sum(pca_variance) )
+  
+  num_PCs = sum( cumulative_variance < threshold * sum(pca_variance) )
+  
+  plot(cumulative_variance[1:200] / sum(pca_variance) ~ seq(1:200), type="l", xlab="Principal Components", ylab= "Cumulative Variance (% total)")
+  abline(v=num_PCs, col="red", lty=2)
+  abline(h=threshold, col="blue", lty=1)
+  text(x=num_PCs+30, y=0.2, labels = paste("PC's selected =", as.character(num_PCs)))
+  text(x=40, y=threshold+0.05, labels=paste("Threshold selected =", as.character(threshold)))
+  
+  return(num_PCs)
+  
 }
 
 num_PCs <- select_dimensionality(summary(train_pca)$sdev, threshold=0.9)
@@ -195,8 +215,7 @@ colnames(testset.pca) <- sub("x.", "PC", colnames(testset.pca))
 ```
 
 
-
-A secondary advantage of PCA is that it becomes possible to plot the relations between high-dimensional data by plotting the first few Principal components, containing the greatest variance.
+A secondary advantage of PCA is that it becomes possible to plot the relations between high-dimensional data by plotting the first few Principal components, containing the greatest variance:
 
 ```{r}
 
@@ -208,14 +227,13 @@ pl
 ```
 
 ```{r}
-# This works, or not, at random, because windows.  It's only here for eye-candy anyway I guess.
 # Visualise the first three principal components poorly
 par(mar=c(0, 0, 0, 0)) # without this, complains about margin size
 scatterplot3d(x=trainset.pca$PC1, y=trainset.pca$PC2, z=trainset.pca$PC3, pch=23, bg=trainset.pca$y, xlab="PC1", ylab="PC2", zlab="PC3")
 ```
 
 
-For visualising high-dimensional data, another option besides PCA exists known as t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the data by dynamically mapping the distance between points in the high-dimensional space to the low ones in a flexible, stochastic way that is itself considered an ML algorithm. Plots created through it can give a good indication of the separability of data.
+For visualising high-dimensional data, another option besides PCA exists known as t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the data by dynamically mapping the distance between points in the high-dimensional space to the low ones in a flexible, stochastic way that is itself considered an ML algorithm. Plots created through it can give a good indication of the separability of data.  In this case the algorithm is able to find mappings that clearly separate the majority of the data within the two-dimensional plot.  This indicates that plenty of information is present within the dataset to power classification.
 
 The downside of the method is that because it does not create a specific, algorithmic mapping between the high-dimensional space and the low, it cannot be applied to new data or test data.  It can only be applied to a dataset as a whole and and is not reproducible, so it can't be easily used to create inputs for ML algorithms.
 
