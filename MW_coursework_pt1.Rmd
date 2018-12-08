@@ -16,6 +16,7 @@ library(tidyverse)
 library(caret)
 library(Rtsne)
 library(scatterplot3d)
+library(keras)
 
 # Windows wd command.  I hate that this line is needed.  I miss Python.
 #setwd("C:/Users/Martin/Dropbox/Study/Intro_Machine_Learning/coursework")
@@ -101,6 +102,9 @@ Labelled data is used to train the ML algorithm, split into training and test da
 
 In this example we have a training dataset of 60,000 samples and a test set of 10,000 samples.  We will train different kNN models, and a neural network, on the first 60,000 and evaluate performance of the different models on the last 10,000.   This will be done by first reducing the dimensionality of the data using PCA, and then selecting the best performing hyperparameter k (number of nearest neighbors to consider) through cross-validated training performance before evaluating a final model on the test set.
 
+As seen in the figure below the classes 0-9 for MNIST are roughly balanced - in this case "Accuracy" is a suitable metric for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
+
+
 ```{r}
 # Plot class membership of the training and test data
 all_ys <- c(as.character(trainset$y), as.character(testset$y))
@@ -117,14 +121,14 @@ pl
 
 ```
 
-As seen in the figure above the classes 0-9 for MNIST are roughly balanced - in this case "Accuracy" and "Area Under Curve" are suitable metrics for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
+
 
 
 ## The MNIST data
 
-The MNIST character dataset is, as described in the coursework brief, an industry standard image classification problem.  An important aspect of the data is that the images have been centred and scaled to the characters, reduced to black and white images and the resolution set uniform.  This removes the need for us to engage in complex image normalisation steps before attempting classification, or more complex models like Convolutional Neural Networks that can automate the discovery of the lowest-level features and relevant areas of an image.  ML algorithms applied to this dataset are then left with higher level logic, finding significant edges and pixels to distinguish between characters.
+The MNIST character dataset is an industry standard image classification problem.  An important aspect of the data is that the images have been centred and scaled to the characters, reduced to black and white images and the resolution set uniform.  This removes the need for us to engage in complex image normalisation steps before attempting classification, or more complex models like Convolutional Neural Networks that can automate the discovery of the lowest-level features and relevant areas of an image.  ML algorithms applied to this dataset are then left with higher level logic, finding significant edges and pixels to distinguish between characters.
 
-The images are 28 * 28 matrices of pixel intensity, the first 25 images are displayed below.  The data has been read in with the above code - note that in the last step the values (which range between 0-255 to represent pixel intensity) are scaled to lie between 0 and 1 - this scaling will help the neural network model to converge and is in general a good idea.  More sophisticated methods of scaling values exist but offer no advantage here.
+The images are 28 * 28 matrices of pixel intensity, the first 25 images are displayed below.  The values (which range between 0-255 to represent pixel intensity) are scaled to lie between 0 and 1 - this scaling will help the neural network model to converge and is in general a good idea.  More sophisticated methods of scaling values exist but offer no advantage here.
 
 
 
@@ -228,12 +232,13 @@ pl
 
 ```{r}
 # Visualise the first three principal components poorly
+# [DN:  If time include legend]
 par(mar=c(0, 0, 0, 0)) # without this, complains about margin size
 scatterplot3d(x=trainset.pca$PC1, y=trainset.pca$PC2, z=trainset.pca$PC3, pch=23, bg=trainset.pca$y, xlab="PC1", ylab="PC2", zlab="PC3")
 ```
 
 
-For visualising high-dimensional data, another option besides PCA exists known as t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the data by dynamically mapping the distance between points in the high-dimensional space to the low ones in a flexible, stochastic way that is itself considered an ML algorithm. Plots created through it can give a good indication of the separability of data.  In this case the algorithm is able to find mappings that clearly separate the majority of the data within the two-dimensional plot.  This indicates that plenty of information is present within the dataset to power classification.
+For merely visualising high-dimensional data, there is also t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the separability of data by dynamically mapping the distance between points in the high-dimensional space to a low-dimensional space in a flexible, stochastic way that is itself considered an ML algorithm.  In this case the algorithm is able to find mappings that clearly separate the majority of the data within the two-dimensional plot.  This indicates that plenty of information is present within the dataset to power classification.
 
 The downside of the method is that because it does not create a specific, algorithmic mapping between the high-dimensional space and the low, it cannot be applied to new data or test data.  It can only be applied to a dataset as a whole and and is not reproducible, so it can't be easily used to create inputs for ML algorithms.
 
@@ -266,22 +271,19 @@ pl
 
 k-NN applied to this dataset benefits greatly from scaling and Principal Component Analysis, both of which have already been applied.  What remains is to determine the best value for the hyperparameter k.  For this purpose I'm using the "caret" ML library, which has lots of useful options and functions for performing grid searches over hyperparameters, before reporting and comparing results on multiple metrics.  Here I compare a raft of different potential values for k in a k-NN model.
 
-I also compare to the performance of Naive Bayes, which attempts to classify assuming every feature is completely independent (a "naive" assumption) and therefore represents a useful baseline performance indicator as the simplest possible multi-class model.
+Once the model's ideal hyperparameters are identified the model is automatically retrained on all of the available training data, in preparation for application to test data.  At this stage the models are evaluated through 5-fold cross-validation rather than creating an additional hold-out validation set, given the low-ish number of training samples and the reasonably fast execution of the algorithm.
 
-[DN:  NAIVE BAYES NOT WORKING YET, NaiveNayes doesn't like zeros or something, working on it]
+The highest predictive accuracy of 0.9748 is obtained with k=3 nearest neighbors.  As a baseline, with 10 ~ balanced classes we could expect a random process to achieve an accuracy of 0.1.   As an aside, the logLoss and AUC are poor guides to performance here because they are calculated from the probabilities of each label for each sample rather than the final classifications, and so for any given sample can appear to improve as a higher k provides better overall probabilities, whilst the final decision/predicted class is in fact wrong [DN:  REFERENCE!!].
 
-[DN: State somewhere, after determining the ideal k-value based on the chosen metric the model is automatically refitted using that value to the whole of the training set.]
-
-[DN: Will increase number of folds to 10 later - it's not running fast enough on this old laptop right now]
 
 ```{r}
 
 # Set up the training algorithm (allows for specifying performance measures and cross-validation folds, etc)
 # Specified class probabilities, a more comprehensive summary function and 10-fold cross-validation
-control <- trainControl(method="cv", number=3, classProbs=TRUE, summaryFunction=multiClassSummary)  
+control <- trainControl(method="cv", number=5, classProbs=TRUE, summaryFunction=multiClassSummary)  
 
 # The metric the algorithm will use to decide the best-performer
-metric <- "Accuracy"  
+metric <- "Accuracy"
 
 # Create the parameterspace to be explored (only one for this algorithm)
 param_grid = data.frame(k = c(3, 5, 7, 9, 11))
@@ -289,10 +291,16 @@ param_grid = data.frame(k = c(3, 5, 7, 9, 11))
 
 Fitting the model can take a while.
 ```{r}
-# For comparison, fit Naive Bayes
-#fit.bay <- train(y~., data=trainset.pca, method="nb", metric=metric, trControl=control)
 # Fit the kNN models
 fit.knn <- train(y~., data=trainset.pca, method="knn", metric=metric, trControl=control, tuneGrid=expand.grid(param_grid))
+save(fit.knn, file="knn_model.Rdata")
+```
+
+```{r}
+# For comparison, fit Naive Bayes
+# This just doesn't work, because it doesn't handle zero-variance within classes (ie; all values the same within a class for a given predictor).
+fit.bay <- train(y~., data=trainset.pca, method="nb", metric=metric, trControl=control)
+save(fit.bay, file="bay_model.Rdata")
 ```
 
 ```{r}
@@ -305,50 +313,20 @@ plot(fit.knn, print.thres=0.5, type="S")
 fit.knn$results[,1:7]
 ```
 
-The highest predictive accuracy, and mean F1 score (calculated from precision and recall) of 0.9751 and 0.9749 respectively are obtained with k=5 nearest neighbors [DN:  May change when run with more folds] so 5 is our preferred value for the k hyperparameter.  The logLoss and AUC are poor guides to performance here because they are calculated from the probabilities of each label for each sample rather than the final classifications, and so for any given sample can appear to improve as a higher k provides better overall probabilities, whilst the final decision/predicted class is in fact wrong. [DN:  Check understanding].
 
 
 
+# 4.  A Further Model - Neural Networks
 
-## 4.  A Further Model - Neural Networks
+## Implementing a basic neural network
 
-For the fun of it I'm going to implement a simple, fully connected feedforward neural network.  Normally for image analysis problems a more complex convolutional neural network is needed, able to fit to the low-level features useful for classification of messy image data.  In this case, as stated earlier, the images are already centred, grey-scaled and reduced to standardised 28*28 pixel resolution.  In combination with PCA to find optimal low-level features a standard MLP should perform quite well on this task.
+For the fun of it I'm going to implement a simple, fully connected feedforward neural network.  Normally for image analysis problems a more complex Convolutional Neural Network (CNN) is better able to fit to the low-level features useful for classification of messy image data.  In this case, as stated earlier, the images are already centred, grey-scaled and reduced to standardised 28*28 pixel resolution.  In combination with PCA to find optimal low-level features a standard MLP should perform quite well on this task.
 
 I got the intro to Keras for R from this website;  https://blog.rstudio.com/2017/09/05/keras-for-r/
 
 Yes, it's just calling Python in the background.  Yes, that's just embarassing for R.  But ONS insists...
 
-We need to build a model, printing a summary of its structure:
-
-```{r}
-# Tell it to use python 3 to run this stuff
-use_python("usr/bin/python3")
-
-# Import sequential model class
-model <- keras_model_sequential()
-
-# Simple model of two hidden, dense layers and a 10 class output layer
-model %>%
-  layer_dense(units=64, activation="relu", input_shape = c( dim(trainset.pca)[2] - 1 )) %>%
-  layer_dropout(rate=0.2) %>%
-  layer_dense(units=32, activation="relu") %>%
-  layer_dropout(rate=0.2) %>%
-  layer_dense(units=10, activation="softmax")
-
-# Compile the model's loss function and optimiser
-model %>% compile(
-  loss = "categorical_crossentropy",
-  optimizer = optimizer_rmsprop(),
-  metrics = c("accuracy")
-)
-
-# print a summary of the model structure we've created
-summary(model)
-
-```
-
-
-This part just shuffles data, one-hot encoding the targets and converting the input to a numeric matrix.  This is basically only needed because the Caret package I was using demanded data frames, so that's the format I set up to import in.  I prefer Python's approach of dropping to matrices and such for any ML work consistently.
+The chunk below one-hot encodes the targets and converts the input to a numeric matrix.  This is basically only needed because the Caret package I was using demanded data frames, so that's the format I set up to import in.  Keras comes with the MNIST dataset pre-formatted but I want to use the data I've already PCA'd and used for kNN for consistency.
 
 ```{r}
 
@@ -362,21 +340,120 @@ testset_x_mat = as.matrix( testset.pca[, -ncol(testset.pca)])
 
 ```
 
-Finally, first application of the model;
 
 ```{r}
+# Tell it to use python 3 to run this stuff
+use_python("usr/bin/python3")
 
-# Fit the model
 
-history <- model %>% fit(
-  trainset_x_mat, trainset_y_cat,
-  epochs = 30, batch_size = 64,
-  validation_split = 0.2
-)
+# Model encapsulated in function to facilitate creating multiple variants
+build_model <- function(hidden_layers=2, n_neurons=c(64, 32), drop_rate=0.2, input_shape) {
+  
+  # Import sequential model class
+  model <- keras_model_sequential()
+  
+  # Create all the hidden layers
+  for(i in seq(1:hidden_layers)) {
+  
+    if(i == 1) {
+      model %>% layer_dense(units=n_neurons[i], activation="relu", input_shape=input_shape)
+    } else {
+      model %>% layer_dense(units=n_neurons[i], activation="relu")
+    }
+    
+    # Add dropout to every hidden layer
+    model %>% layer_dropout(rate=drop_rate)
+  }
+  
+  # Create the final output layer
+  model %>% layer_dense(units=10, activation="softmax")
+  
+  # Set up loss function, optimiser and metric
+  model %>% compile(
+    loss="categorical_crossentropy",
+    optimizer=optimizer_rmsprop(),
+    metrics=c("accuracy")
+  )
+  
+  return(model)
+}
 ```
+
+
 
 ```{r}
 # Evaluate the model
 model %>% evaluate(testset_x_mat, testset_y_cat)
 ```
+
+## Build some models
+
+A range of neural networks with different hyperparameters are were tested iteratively, manually refining the number of neurons and the dropout rate for regularisation.  A more effective method in future, especially given the rapidity of training (< 1 minute per model) would be to set up a grid search over the number of neurons in the 1st and 2nd layers, and over the dropout rate.
+
+```{r}
+
+# Fit a variety of NN's
+
+# Start with something oversized
+model1 <- build_model(n_neurons = c(256, 64), input_shape=c( dim(trainset.pca)[2] - 1 ))
+summary(model1)
+history1 <- model1 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_size = 64, validation_split = 0.2)
+
+# Shrink second hidden layer, reduce overfitting?
+model2 <- build_model(n_neurons = c(256, 32), input_shape=c( dim(trainset.pca)[2] - 1 ))
+summary(model2)
+history2 <- model2 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_size = 64, validation_split = 0.2)
+
+# Shrink it a bit further, to reduce comp time and overfitting
+model3 <- build_model(n_neurons = c(128, 32), input_shape=c( dim(trainset.pca)[2] - 1 ))
+summary(model3)
+history3 <- model3 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_size = 64, validation_split = 0.2)
+
+# Try a higher dropout rate
+model4 <- build_model(n_neurons = c(256, 64), drop_rate=0.4, input_shape=c( dim(trainset.pca)[2] - 1 ))
+summary(model4)
+history4 <- model4 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_size = 64, validation_split = 0.2)
+
+```
+
+
+```{r}
+# Plot the model's histories to compare
+
+plot(history1)
+plot(history2)
+plot(history3)
+plot(history4)
+```
+
+## 5.  Evaluate Models on Test Set
+
+The two candidate models, k-NN with k=5 and the neural network (two hidden layers of 128 and 32 neurons, dropout rate of 0.4) are evaluated on their accuracy in classifying the test data.
+
+```{r}
+# Evaluate the best-performing Neural network on the test data
+model3 %>% evaluate(testset_x_mat, testset_y_cat)
+```
+
+```{r}
+# Evaluate the knn model on the test data
+knn_pred <- predict(fit.knn, testset.pca)
+```
+
+```{r}
+# I want a confusion matrix for best-performer!
+```
+
+
+## 6.  Conclusions &  Recommendations
+
+Based on the chosen metric (accuracy) the neural network outperforms the k-NN algorithm with a relative gain of X % [DN:  Fill this in].  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  The chosen neural network has 2 hidden layers (relu) of 128 and 32 neurons respectively, with a dropout rate on all hidden neurons of 0.4.
+
+If this model were further developed a good option might be to try other types of regularisation besides dropout.  As with Convolutional Neural Networks (CNN's), since the neural network here is modelling a spatial image problem it's possible that dropping features from the first hidden layer especially makes little logical sense.  If some of those neurons are learning simple features/correlations that are useful across all classifications then dropping them would rob the next layer of universal, essential features.  L1 and L2 regularisation may limit overfitting without this issue.
+
+If an entirely new model were to be developed, then dropping this approach and switching to a 
+
+- compare to kNN
+- compare to other models in the MNIST results data
+- describe current limitations & strategies to improve
 
