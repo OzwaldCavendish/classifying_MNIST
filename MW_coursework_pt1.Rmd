@@ -1,6 +1,8 @@
 ---
 title: "MNIST Written Character Classification - Pt1"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -17,6 +19,7 @@ library(caret)
 library(Rtsne)
 library(scatterplot3d)
 library(keras)
+library(MLmetrics)
 
 # Windows wd command.  I hate that this line is needed.  I miss Python.
 #setwd("C:/Users/Martin/Dropbox/Study/Intro_Machine_Learning/coursework")
@@ -100,9 +103,9 @@ In machine learning, a supervised classification problem entails fitting an algo
 
 Labelled data is used to train the ML algorithm, split into training and test data.  In training the algorithm we run the risk of over-fitting, a complex model can become over-reliant on aspects of the data that are just quirks of the particular set.  The result is reduced performance when the trained model is used to classify new data that it's not been exposed to during training.  The solution to this is to hold out a "test" set of labelled data, and use it to evaluate the model's performance on unseen data.
 
-In this example we have a training dataset of 60,000 samples and a test set of 10,000 samples.  We will train different kNN models, and a neural network, on the first 60,000 and evaluate performance of the different models on the last 10,000.   This will be done by first reducing the dimensionality of the data using PCA, and then selecting the best performing hyperparameter k (number of nearest neighbors to consider) through cross-validated training performance before evaluating a final model on the test set.
+In this example we have a training dataset of 60,000 samples and a test set of 10,000 samples.  We will train different kNN models and neural networks on the first 60,000 and evaluate performance of the different models on the last 10,000.   This will be done for kNN by first reducing the dimensionality of the data using PCA, and then selecting the best performing hyperparameter k (number of nearest neighbors to consider) through cross-validated training performance before evaluating a final model on the test set.
 
-As seen in the figure below the classes 0-9 for MNIST are roughly balanced - in this case "Accuracy" is a suitable metric for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
+As seen in the figure below the classes 0-9 for MNIST are roughly balanced - in this case simple "Accuracy" is a suitable metric for model performance.  If the dataset were unbalanced, "Precision", "Recall" and their average "F1-Score" would be good choices because they can penalise the model for poor performance on important (for humans) minority classes.
 
 
 ```{r}
@@ -164,6 +167,8 @@ close(to.read)
 
 
 # 2.  Dimensionality Reduction
+
+## Principal Component Analysis (PCA)
 
 Principal Component Analysis (PCA) works by calculating the axis in the n-dimensional data space along which variance is greatest, and then sequentially finding perpendicular axes with the next greatest variance.  The algorithm can be used for dimensionality reduction, by dropping all but the first few axes embodying the highest percentage of variance within the dataset.  This retains axes along which data is well separated while dropping "noisy" axes lacking clear information (separation of categories).
 
@@ -238,6 +243,8 @@ scatterplot3d(x=trainset.pca$PC1, y=trainset.pca$PC2, z=trainset.pca$PC3, pch=23
 ```
 
 
+## t-SNE
+
 For merely visualising high-dimensional data, there is also t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the separability of data by dynamically mapping the distance between points in the high-dimensional space to a low-dimensional space in a flexible, stochastic way that is itself considered an ML algorithm.  In this case the algorithm is able to find mappings that clearly separate the majority of the data within the two-dimensional plot.  This indicates that plenty of information is present within the dataset to power classification.
 
 The downside of the method is that because it does not create a specific, algorithmic mapping between the high-dimensional space and the low, it cannot be applied to new data or test data.  It can only be applied to a dataset as a whole and and is not reproducible, so it can't be easily used to create inputs for ML algorithms.
@@ -297,13 +304,6 @@ save(fit.knn, file="knn_model.Rdata")
 ```
 
 ```{r}
-# For comparison, fit Naive Bayes
-# This just doesn't work, because it doesn't handle zero-variance within classes (ie; all values the same within a class for a given predictor).
-fit.bay <- train(y~., data=trainset.pca, method="nb", metric=metric, trControl=control)
-save(fit.bay, file="bay_model.Rdata")
-```
-
-```{r}
 # Plot performance of all knn variants
 plot(fit.knn, print.thres=0.5, type="S")
 ```
@@ -318,15 +318,16 @@ fit.knn$results[,1:7]
 
 # 4.  A Further Model - Neural Networks
 
-## Implementing a basic neural network
-
 For the fun of it I'm going to implement a simple, fully connected feedforward neural network.  Normally for image analysis problems a more complex Convolutional Neural Network (CNN) is better able to fit to the low-level features useful for classification of messy image data.  In this case, as stated earlier, the images are already centred, grey-scaled and reduced to standardised 28*28 pixel resolution.  In combination with PCA to find optimal low-level features a standard MLP should perform quite well on this task.
 
-I got the intro to Keras for R from this website;  https://blog.rstudio.com/2017/09/05/keras-for-r/
 
-Yes, it's just calling Python in the background.  Yes, that's just embarassing for R.  But ONS insists...
+## Awkward authors note
 
-The chunk below one-hot encodes the targets and converts the input to a numeric matrix.  This is basically only needed because the Caret package I was using demanded data frames, so that's the format I set up to import in.  Keras comes with the MNIST dataset pre-formatted but I want to use the data I've already PCA'd and used for kNN for consistency.
+In the interest of honesty I found an introduction to Keras for R at https://blog.rstudio.com/2017/09/05/keras-for-r/, and both this introduction and the book Deep Learning in Python by F. Chollet use MNIST heavily as a teaching example.  I've tried to forget what I learned of specific parameters in building these NN's, and in fairness the guides did not use PCA, but I should own up to having had the help.
+
+PS; Yes, Keras for R is just calling Python in the background.  Yes, that's just embarassing for R.  But ONS insists...
+
+The chunk below one-hot encodes the targets and converts the input to a numeric matrix.  This is basically only needed because the Caret package I was using demanded data frames, so that's the format I set up to import in.  Keras comes with the MNIST dataset pre-formatted but I want to use the data I've already "PCA'd"" and used for kNN, for consistency.
 
 ```{r}
 
@@ -381,14 +382,12 @@ build_model <- function(hidden_layers=2, n_neurons=c(64, 32), drop_rate=0.2, inp
 
 
 
-```{r}
-# Evaluate the model
-model %>% evaluate(testset_x_mat, testset_y_cat)
-```
-
-## Build some models
+## Refining neural network hyperparameters "by hand"
 
 A range of neural networks with different hyperparameters are were tested iteratively, manually refining the number of neurons and the dropout rate for regularisation.  A more effective method in future, especially given the rapidity of training (< 1 minute per model) would be to set up a grid search over the number of neurons in the 1st and 2nd layers, and over the dropout rate.
+
+The second model tested gives the best validation accuracy at the end of training despite showing signs of slight overfitting, with training accuracies consistently ~ 0.5 % higher than validation accuracies in the final few epochs (see plots).  In comparison, in the plots the first neural network with more neurons in the second layer shows worse overfitting and overall validation performance.  Increasing the dropout rate to combat this (model 4) lowers the validation accuracy, in later runs for this model the training accuracy is significantly and consistently lower than validation accuracy.
+
 
 ```{r}
 
@@ -428,32 +427,40 @@ plot(history4)
 
 ## 5.  Evaluate Models on Test Set
 
-The two candidate models, k-NN with k=5 and the neural network (two hidden layers of 128 and 32 neurons, dropout rate of 0.4) are evaluated on their accuracy in classifying the test data.
+The two candidate models, k-NN (k=3) and the best-performing neural network (two hidden layers of 256 and 32 neurons, dropout rate of 0.2) were chosen based upon their cross-validated accuracies.  the kNN algorithm manages as accuracy of 0.9743, while the neural network improves on this with 0.9804, a relative gain of 24 %.  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  An added practical advantage of the neural network is that it is much, much faster to train and apply than the kNN algorithm.
 
 ```{r}
-# Evaluate the best-performing Neural network on the test data
-model3 %>% evaluate(testset_x_mat, testset_y_cat)
+# Evaluate the best-performing neural network on the test data
+model2 %>% evaluate(testset_x_mat, testset_y_cat)
 ```
+
 
 ```{r}
 # Evaluate the knn model on the test data
-knn_pred <- predict(fit.knn, testset.pca)
+# This looks slightly different due to a lack of neat inbuilt evaluation functions like what Keras has
+# fit.knn <- load("knn_model.Rdata")
+
+knn_pred <- predict(fit.knn, testset.pca[,1:86])
+
+Accuracy(y_pred=knn_pred, y_true=testset.pca$y)
 ```
 
 ```{r}
-# I want a confusion matrix for best-performer!
+# Create a table of class vs prediction for the neural network
+
+nn_pred <- model2 %>% predict_classes(testset_x_mat)
+nn_true <- as.integer( sub("chr", "", testset.pca$y) )
+
+table(Actual=nn_true, Predicted=nn_pred)
+
 ```
 
 
 ## 6.  Conclusions &  Recommendations
 
-Based on the chosen metric (accuracy) the neural network outperforms the k-NN algorithm with a relative gain of X % [DN:  Fill this in].  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  The chosen neural network has 2 hidden layers (relu) of 128 and 32 neurons respectively, with a dropout rate on all hidden neurons of 0.4.
+The neural network outperforms kNN, but only just.  The biggest advantage to the neural network is that it scales well to larger datasets in terms of computational time.  On this large-ish dataset the neural network already runs significantly faster than kNN - any more training data would make kNN unuseably slow - at least with this implementation, which appears to use only one core on my laptop.  Comparing the best performance here (accuracy of NN = 0.9804 on test data) to examples found on the MNIST database, it doesn't fare badly.  kNN has been used to achieve much better results than the PCA + k=3 implementation through the use of non-linear deformations to transform the feature space (test error rate of 0.52, [DN:  Add ref!]).  Convolutional neural networks, and neural networks in general with more neurons and more sophisticated loss functions, consistently achieve < 1 % test error rates (eg; [DN: Add ref!]).
 
-If this model were further developed a good option might be to try other types of regularisation besides dropout.  As with Convolutional Neural Networks (CNN's), since the neural network here is modelling a spatial image problem it's possible that dropping features from the first hidden layer especially makes little logical sense.  If some of those neurons are learning simple features/correlations that are useful across all classifications then dropping them would rob the next layer of universal, essential features.  L1 and L2 regularisation may limit overfitting without this issue.
+If this simple fully connected neural network were further developed a good option might be to try other types of regularisation besides dropout.  This is speculative, but as with Convolutional Neural Networks (CNN's) since the neural network here is modelling a spatial image problem it's possible that dropping features from the first hidden layer especially makes little sense.  If those neurons are learning simple low-level features/correlations that are useful across all classifications then dropping them would rob the next layer of universal, essential features.  L1 and L2 regularisation may limit overfitting without this issue.
 
-If an entirely new model were to be developed, then dropping this approach and switching to a 
-
-- compare to kNN
-- compare to other models in the MNIST results data
-- describe current limitations & strategies to improve
+If an entirely new model were to be developed, then dropping this approach with PCA and switching to a CNN would definitely work better.  This is an image classification problem, and CNN's are specifically structured to tackle such problems.  Data augmentation (adding permutations of the same images to the dataset) would be possible, and would deal much more effectively with overfitting than dropout or L1/L2 regularisation.
 
