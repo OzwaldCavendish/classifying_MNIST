@@ -1,18 +1,17 @@
 ---
 title: "MNIST Written Character Classification"
+author: "St.No. 17005465"
+date: "9th December 2018"
 output:
   html_document:
+    toc: true
+    toc_float: true
     df_print: paged
 ---
 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-
-
-
-```{r}
 
 library(tidyverse)
 library(caret)
@@ -96,9 +95,15 @@ for(column in colnames(trainset[,2:785])) {
 ```
 
 
-# 1. Introduction
+## 1. Introduction
 
-## Machine Learning and Supervised Classification
+
+### Awkward authors' note
+
+In the interest of honesty I should note that pretty much every tutorial on neural networks I've found used the MNIST dataset as the example, it seems pretty ubiquitous.  Primarily I've used an introduction to Keras for R at https://blog.rstudio.com/2017/09/05/keras-for-r/, and the book Deep Learning in Python by F. Chollet.  I've done my best to forget what I learned of specific parameters in building these NN's, and in fairness the guides did not use PCA.  Also yes, Keras for R is just calling Python in the background and yes, that's just embarassing for R.  But ONS insists...
+
+
+### Machine Learning and Supervised Classification
 
 In machine learning, a supervised classification problem entails fitting an algorithm to map some input features X to a desirable output label Y, ie; training a machine to automatically classify a sample into some category based on available data about it ("Is this customer fraudulent? Is this a picture of a face?").
 
@@ -128,7 +133,7 @@ pl
 
 
 
-## The MNIST data
+### The MNIST data
 
 The MNIST character dataset is an industry standard image classification problem.  An important aspect of the data is that the images have been centred and scaled to the characters, reduced to black and white images and the resolution set uniform.  This removes the need for us to engage in complex image normalisation steps before attempting classification, or more complex models like Convolutional Neural Networks that can automate the discovery of the lowest-level features and relevant areas of an image.  ML algorithms applied to this dataset are then left with higher level logic, finding significant edges and pixels to distinguish between characters.
 
@@ -167,9 +172,9 @@ close(to.read)
 
 
 
-# 2.  Dimensionality Reduction
+## 2.  Dimensionality Reduction
 
-## Principal Component Analysis (PCA)
+### Principal Component Analysis (PCA)
 
 Principal Component Analysis (PCA) works by calculating the axis in the n-dimensional data space along which variance is greatest, and then sequentially finding perpendicular axes with the next greatest variance.  The algorithm can be used for dimensionality reduction, by dropping all but the first few axes embodying the highest percentage of variance within the dataset.  This retains axes along which data is well separated while dropping "noisy" axes lacking clear information (separation of categories).  The visualised rotations, the linear mappings from the images to each principal component, show for example features like empty space at the centre (first tile) and curves that look suspiciously like the number nine (second tile).
 
@@ -243,7 +248,7 @@ pl
 ```
 
 
-## t-SNE
+### t-SNE
 
 For merely visualising high-dimensional data, there is also t-SNE (t-Distributed Stochastic Neighbor Embedding).  This is more powerfully able to visualise the separability of data by dynamically mapping the distance between points in the high-dimensional space to a low-dimensional space in a flexible, stochastic way that is itself considered an ML algorithm.  In this case the algorithm is able to find mappings that clearly separate the majority of the data within the two-dimensional plot.  This indicates that plenty of information is present within the dataset to power classification.
 
@@ -274,19 +279,18 @@ pl
 
 
 
-# 3. Classification with k-Nearest Neighbors (k-NN)
+## 3. Classification with k-Nearest Neighbors (k-NN)
 
 k-NN applied to this dataset benefits greatly from scaling and Principal Component Analysis, both of which have already been applied.  What remains is to determine the best value for the hyperparameter k.  For this purpose I'm using the "caret" ML library, which has lots of useful options and functions for performing grid searches over hyperparameters, before reporting and comparing results on multiple metrics.  Here I compare a raft of different potential values for k in a k-NN model.
 
 Once the model's ideal hyperparameters are identified the model is automatically retrained on all of the available training data, in preparation for application to test data.  At this stage the models are evaluated through 5-fold cross-validation rather than creating an additional hold-out validation set, given the low-ish number of training samples and the reasonably fast execution of the algorithm.
 
-The highest predictive accuracy of 0.9748 is obtained with k=3 nearest neighbors.  As a baseline, with 10 ~ balanced classes we could expect a random process to achieve an accuracy of 0.1.   As an aside, the logLoss and AUC are poor guides to performance here because they are calculated from the probabilities of each label for each sample rather than the final classifications, and so for any given sample can appear to improve as a higher k provides better overall probabilities, whilst the final decision/predicted class is in fact wrong.
+The highest predictive accuracy of 0.9753 is obtained with k=3 nearest neighbors.  As a baseline, with 10 ~ balanced classes we could expect a random process to achieve an accuracy of 0.1.   As an aside, the logLoss and AUC are poor guides to performance here because they are calculated from the probabilities of each label for each sample rather than the final classifications, and so for any given sample can appear to improve as a higher k provides better overall probabilities, whilst the final decision/predicted class is in fact wrong.
 
 
 ```{r}
-
 # Set up the training algorithm (allows for specifying performance measures and cross-validation folds, etc)
-# Specified class probabilities, a more comprehensive summary function and 10-fold cross-validation
+# Specified class probabilities, a more comprehensive summary function and 5-fold cross-validation
 control <- trainControl(method="cv", number=5, classProbs=TRUE, summaryFunction=multiClassSummary)  
 
 # The metric the algorithm will use to decide the best-performer
@@ -317,21 +321,13 @@ fit.knn$results[,1:7]
 
 
 
-# 4.  A Further Model - Neural Networks
+## 4.  A Further Model - Neural Networks
 
 For the fun of it I'm going to implement a simple, fully connected feedforward neural network.  Normally for image analysis problems a more complex Convolutional Neural Network (CNN) is better able to fit to the low-level features useful for classification of messy image data.  In this case, as stated earlier, the images are already centred, grey-scaled and reduced to standardised 28*28 pixel resolution.  In combination with PCA to find optimal low-level features a standard MLP should perform quite well on this task.
 
-
-## Awkward authors note
-
-In the interest of honesty I found an introduction to Keras for R at https://blog.rstudio.com/2017/09/05/keras-for-r/, and both this introduction and the book Deep Learning in Python by F. Chollet use MNIST heavily as a teaching example.  I've tried to forget what I learned of specific parameters in building these NN's, and in fairness the guides did not use PCA, but I should own up to having had the help.
-
-PS; Yes, Keras for R is just calling Python in the background.  Yes, that's just embarassing for R.  But ONS insists...
-
-The chunk below one-hot encodes the targets and converts the input to a numeric matrix.  This is basically only needed because the Caret package I was using demanded data frames, so that's the format I set up to import in.  Keras comes with the MNIST dataset pre-formatted but I want to use the data I've already "PCA'd"" and used for kNN, for consistency.
+First, one-hot encode the targets and convert the input to a numeric matrix.  Keras comes with the MNIST dataset pre-formatted but I want to use the data I've already "PCA'd"" and used for kNN, for consistency.
 
 ```{r}
-
 # Convert the (now character) classes into one-hot-encoded categorical target vars
 trainset_y_cat = to_categorical( as.integer( sub("chr", "", trainset.pca$y) ) )
 testset_y_cat = to_categorical( as.integer( sub("chr", "", testset.pca$y) ) )
@@ -339,7 +335,6 @@ testset_y_cat = to_categorical( as.integer( sub("chr", "", testset.pca$y) ) )
 # Convert the input data into a pure number matrix format
 trainset_x_mat = as.matrix( trainset.pca[, -ncol(trainset.pca)])
 testset_x_mat = as.matrix( testset.pca[, -ncol(testset.pca)]) 
-
 ```
 
 
@@ -383,7 +378,7 @@ build_model <- function(hidden_layers=2, n_neurons=c(64, 32), drop_rate=0.2, inp
 
 
 
-## Refining neural network hyperparameters "by hand"
+### Refining neural network hyperparameters "by hand"
 
 A range of neural networks with different hyperparameters are were tested iteratively, manually refining the number of neurons and the dropout rate for regularisation.  A more effective method in future, especially given the rapidity of training (< 1 minute per model) would be to set up a grid search over the number of neurons in the 1st and 2nd layers, and over the dropout rate.
 
@@ -423,7 +418,6 @@ history4 <- model4 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_si
 
 ```{r}
 # Plot the model's histories to compare
-
 plot(history1)
 plot(history2)
 plot(history3)
@@ -439,7 +433,7 @@ history2 <- model2 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_si
 
 ## 5.  Evaluate Models on Test Set
 
-The two candidate models, k-NN (k=3) and the best-performing neural network (two hidden layers of 256 and 32 neurons, dropout rate of 0.2) were chosen based upon their cross-validated accuracies.  the kNN algorithm manages as accuracy of 0.9743, while the neural network improves on this with 0.9827, a relative gain of 67 %.  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  An added practical advantage of the neural network is that it is much, much faster to train and apply than the kNN algorithm.
+The two candidate models, k-NN (k=3) and the best-performing neural network (two hidden layers of 256 and 32 neurons, dropout rate of 0.2) were chosen based upon their cross-validated accuracies.  the kNN algorithm manages as accuracy of 0.9753, while the neural network improves on this with 0.9823, a relative performance gain of ~30 %.  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  An added practical advantage of the neural network is that it is much, much faster to train and apply than the kNN algorithm.
 
 ```{r}
 # Evaluate the model on the best-performing NN on the test data
@@ -468,9 +462,9 @@ table(Actual=nn_true, Predicted=nn_pred)
 ```
 
 
-## 6.  Conclusions &  Recommendations
+## 6.  Conclusions & Recommendations
 
-The neural network outperforms kNN, but only just.  The biggest advantage to the neural network is that it scales well to larger datasets in terms of computational time.  On this large-ish dataset the neural network already runs significantly faster than kNN - any more training data would make kNN unuseably slow - at least with this implementation, which appears to use only one core on my laptop.  Comparing the best performance here (accuracy of NN = 0.9804 on test data) to examples found on the MNIST database, it doesn't fare badly.  kNN has been used to achieve much better results than the PCA + k=3 implementation through the use of non-linear deformations to transform the feature space, getting test error rate of near 0.5 %.  Convolutional neural networks, and neural networks in general with more neurons and more sophisticated loss functions, consistently achieve < 1 % test error rates.
+The neural network outperforms kNN, but only just.  The biggest advantage to the neural network is that it scales well to larger datasets in terms of computational time.  On this large-ish dataset and mid-range laptop the neural network can be trained in a much shorter time (minutes) than it takes to cross-validate a kNN model for given k (30 minutes - hour).  Comparing the best performance here (accuracy of NN = 0.9827 on test data) to examples found on the MNIST database (http://yann.lecun.com/exdb/mnist/), it fares well in comparison.  kNN has been used to achieve much better results than the PCA + k=3 implementation through the use of non-linear deformations to transform the feature space, getting test error rate of near 0.5 %.  Convolutional neural networks, and neural networks in general with more neurons and more sophisticated loss functions, consistently achieve < 1 % test error rates.
 
 If this simple fully connected neural network were further developed a good option might be to try other types of regularisation besides dropout.  This is speculative, but as with Convolutional Neural Networks (CNN's) since the neural network here is modelling a spatial image problem it's possible that dropping features from the first hidden layer especially makes little sense.  If those neurons are learning simple low-level features/correlations that are useful across all classifications then dropping them would rob the next layer of universal, essential features.  L1 and L2 regularisation may limit overfitting without this issue.
 
