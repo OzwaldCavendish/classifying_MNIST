@@ -3,10 +3,12 @@ title: "MNIST Written Character Classification"
 author: "St.No. 17005465"
 date: "9th December 2018"
 output:
+  pdf_document:
+    toc: yes
   html_document:
-    toc: true
-    toc_float: true
     df_print: paged
+    toc: yes
+    toc_float: yes
 ---
 
 
@@ -433,7 +435,7 @@ history2 <- model2 %>% fit(trainset_x_mat, trainset_y_cat, epochs = 30, batch_si
 
 ## 5.  Evaluate Models on Test Set
 
-The two candidate models, k-NN (k=3) and the best-performing neural network (two hidden layers of 256 and 32 neurons, dropout rate of 0.2) were chosen based upon their cross-validated accuracies.  the kNN algorithm manages as accuracy of 0.9753, while the neural network improves on this with 0.9823, a relative performance gain of ~30 %.  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  An added practical advantage of the neural network is that it is much, much faster to train and apply than the kNN algorithm.
+The two candidate models, k-NN (k=3) and the best-performing neural network (two hidden layers of 256 and 32 neurons, dropout rate of 0.2) were chosen based upon their cross-validated accuracies.  the kNN algorithm manages as accuracy of 0.9737, while the neural network improves on this with 0.9823, a relative performance gain of ~32 %.  An important property beside accuracy is whether the model performs equally well across all classes.  The final confusion matrix indicates that this is the case, meaning the model would not have a bias problem if used "in anger".  An added practical advantage of the neural network is that it is much, much faster to train and apply than the kNN algorithm.
 
 ```{r}
 # Evaluate the model on the best-performing NN on the test data
